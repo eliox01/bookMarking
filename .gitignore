@@ -10,3 +10,4 @@ __pycache__/
 
 # Ignore Streamlit local secrets
 .streamlit/
+.streamlit/
