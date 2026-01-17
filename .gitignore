@@ -1,0 +1,12 @@
+# Ignore the virtual environment
+venv/
+
+# Ignore the local SQLite database (since we are switching to GSheets)
+*.db
+
+# Ignore Python bytecode
+__pycache__/
+*.py[cod]
+
+# Ignore Streamlit local secrets
+.streamlit/
