@@ -1,4 +1,8 @@
-streamlit
-pandas
-gspread
-oauth2client
+streamlit>=1.28.0
+pandas>=2.0.0
+gspread>=5.12.0
+oauth2client>=4.1.3gspread==5.12.4
+gspread-dataframe==4.0.0
+gspread-formatting==1.2.1
+gspread-pandas==3.3.0
+oauth2client==4.1.3

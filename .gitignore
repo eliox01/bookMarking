@@ -1,13 +1,22 @@
-# Ignore the virtual environment
+# Virtual Environment
 venv/
+.venv/
+env/
 
-# Ignore the local SQLite database (since we are switching to GSheets)
+# Data & Secrets
 *.db
+*.sqlite3
+.env
+.streamlit/secrets.toml
 
-# Ignore Python bytecode
+# Python & IDEs
 __pycache__/
 *.py[cod]
+*$py.class
+.vscode/
+.idea/
 
-# Ignore Streamlit local secrets
-.streamlit/
-.streamlit/
+# OS Metadata (The "Ghost" files)
+.DS_Store
+Thumbs.db
+.directory

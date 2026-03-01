@@ -4,6 +4,7 @@ from datetime import datetime
 from urllib.parse import urlparse
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+import hashlib
 
 # --- APP CONFIG ---
 st.set_page_config(page_title="My Cyber Research Bookmarks", layout="wide")
@@ -82,7 +83,13 @@ except Exception as e:
 
 
 def get_bookmarks():
-    """Read data from Google Sheets"""
+    """
+    Read data from Google Sheets
+
+    Returns:
+        pd.DataFrame: DataFrame containing all bookmarks with columns:
+                     date, title, url, category, tags, notes
+    """
     try:
         sheet = init_gsheets_connection()
         if sheet is None:
@@ -149,7 +156,16 @@ def get_bookmarks():
 
 
 def save_bookmark(new_row_data):
-    """Save a new bookmark to Google Sheets"""
+    """
+    Save a new bookmark to Google Sheets
+
+    Args:
+        new_row_data (dict): Dictionary containing bookmark data with keys:
+                            date, title, url, category, tags, notes
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
     try:
         sheet = init_gsheets_connection()
         if sheet is None:
@@ -175,8 +191,67 @@ def save_bookmark(new_row_data):
         return False, f"Error saving: {str(e)}"
 
 
+def delete_bookmark(row_index):
+    """
+    Delete a bookmark from Google Sheets
+
+    Args:
+        row_index (int): The row number to delete (1-indexed, accounting for header)
+
+    Returns:
+        tuple: (success: bool, message: str)
+    """
+    try:
+        sheet = init_gsheets_connection()
+        if sheet is None:
+            return False, "Failed to connect to Google Sheets"
+
+        worksheet = sheet.worksheet("main")
+
+        # Google Sheets rows are 1-indexed, and we need to account for the header row
+        # row_index from our DataFrame needs +2 (1 for header, 1 for 0-indexed to 1-indexed)
+        sheet_row_number = row_index + 2
+
+        # Delete the row
+        worksheet.delete_rows(sheet_row_number)
+
+        return True, "Bookmark deleted successfully!"
+
+    except Exception as e:
+        return False, f"Error deleting: {str(e)}"
+
+
+def find_duplicates(df):
+    """
+    Find duplicate bookmarks based on URL
+
+    Args:
+        df (pd.DataFrame): DataFrame containing bookmarks
+
+    Returns:
+        pd.DataFrame: DataFrame containing only duplicate entries
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    # Find duplicates based on URL (case-insensitive)
+    df["url_lower"] = df["url"].str.lower().str.strip()
+    duplicates = df[df.duplicated(subset=["url_lower"], keep=False)]
+    duplicates = duplicates.drop(columns=["url_lower"])
+
+    return duplicates.sort_values("url")
+
+
 def validate_url(url):
-    """Basic URL validation"""
+    """
+    Basic URL validation
+
+    Args:
+        url (str): URL string to validate
+
+    Returns:
+        bool: True if valid URL, False otherwise
+    """
     try:
         result = urlparse(url)
         return all([result.scheme, result.netloc])
@@ -245,51 +320,133 @@ with st.sidebar:
     try:
         df_stats = get_bookmarks()
         st.metric("Total Bookmarks", len(df_stats))
+
+        # Show duplicate count
+        duplicates = find_duplicates(df_stats)
+        if not duplicates.empty:
+            st.metric("🔄 Duplicate URLs", len(duplicates))
     except:
         st.metric("Total Bookmarks", "0")
 
-# --- MAIN VIEW: RESEARCH FEED ---
+# --- MAIN VIEW: TABS FOR DIFFERENT VIEWS ---
 st.session_state["current_context"] = "main"
-st.subheader("📚 Your Research Feed")
+
+# Create tabs for different views
+tab1, tab2 = st.tabs(["📚 All Bookmarks", "🔄 Manage Duplicates"])
 
 df = get_bookmarks()
 
-# Search functionality
-search_query = st.text_input(
-    "🔍 Search bookmarks...", placeholder="Search by title, tags, or notes..."
-)
+# TAB 1: ALL BOOKMARKS
+with tab1:
+    st.subheader("📚 Your Research Feed")
 
-if not df.empty and len(df) > 0:
-    # Reverse to show newest first
-    display_df = df.iloc[::-1].copy()
+    # Search functionality
+    search_query = st.text_input(
+        "🔍 Search bookmarks...", placeholder="Search by title, tags, or notes..."
+    )
 
-    if search_query:
-        # Simple string matching across all columns
-        mask = display_df.apply(
-            lambda row: row.astype(str).str.contains(search_query, case=False).any(),
-            axis=1,
-        )
-        display_df = display_df[mask]
+    if not df.empty and len(df) > 0:
+        # Reverse to show newest first
+        display_df = df.iloc[::-1].copy()
+        # Add index for deletion tracking
+        display_df["original_index"] = range(len(df) - 1, -1, -1)
 
-    if len(display_df) == 0:
-        st.info(f"No bookmarks match '{search_query}'")
+        if search_query:
+            # Simple string matching across all columns
+            mask = display_df.apply(
+                lambda row: row.astype(str)
+                .str.contains(search_query, case=False)
+                .any(),
+                axis=1,
+            )
+            display_df = display_df[mask]
+
+        if len(display_df) == 0:
+            st.info(f"No bookmarks match '{search_query}'")
+        else:
+            for index, row in display_df.iterrows():
+                with st.container():
+                    col1, col2 = st.columns([5, 1])
+
+                    with col1:
+                        st.markdown(f"### [{row['title']}]({row['url']})")
+                        st.markdown(f"**`{row['category']}`** 📅 {row['date']}")
+                        if pd.notna(row["tags"]) and row["tags"]:
+                            st.caption(f"🏷️ {row['tags']}")
+                        if pd.notna(row["notes"]) and row["notes"]:
+                            with st.expander("View Notes"):
+                                st.write(row["notes"])
+
+                    with col2:
+                        # Delete button for each bookmark
+                        if st.button("🗑️ Delete", key=f"delete_{row['original_index']}"):
+                            with st.spinner("Deleting..."):
+                                success, message = delete_bookmark(
+                                    row["original_index"]
+                                )
+                                if success:
+                                    st.success(message)
+                                    st.cache_resource.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+
+                    st.divider()
     else:
-        for index, row in display_df.iterrows():
-            with st.container():
-                col1, col2 = st.columns([4, 1])
-                with col1:
-                    st.markdown(f"### [{row['title']}]({row['url']})")
-                    st.markdown(f"**`{row['category']}`** 📅 {row['date']}")
-                    if pd.notna(row["tags"]) and row["tags"]:
-                        st.caption(f"🏷️ {row['tags']}")
-                    if pd.notna(row["notes"]) and row["notes"]:
-                        with st.expander("View Notes"):
-                            st.write(row["notes"])
-                st.divider()
-else:
-    st.info("📝 No bookmarks found. Add one in the sidebar to get started!")
-    st.markdown("---")
-    st.markdown("### Quick Start:")
-    st.markdown("1. Fill out the form in the sidebar")
-    st.markdown("2. Click 'Save Bookmark'")
-    st.markdown("3. Your bookmark will appear here!")
+        st.info("📝 No bookmarks found. Add one in the sidebar to get started!")
+        st.markdown("---")
+        st.markdown("### Quick Start:")
+        st.markdown("1. Fill out the form in the sidebar")
+        st.markdown("2. Click 'Save Bookmark'")
+        st.markdown("3. Your bookmark will appear here!")
+
+# TAB 2: DUPLICATES MANAGEMENT
+with tab2:
+    st.subheader("🔄 Duplicate Bookmarks")
+    st.markdown("These bookmarks have the same URL. Keep one and delete the others.")
+
+    duplicates = find_duplicates(df)
+
+    if duplicates.empty:
+        st.success("✅ No duplicate bookmarks found!")
+        st.balloons()
+    else:
+        st.warning(f"Found {len(duplicates)} duplicate bookmark entries")
+
+        # Group by URL to show duplicates together
+        for url in duplicates["url"].unique():
+            url_dupes = df[
+                df["url"].str.lower().str.strip() == url.lower().strip()
+            ].copy()
+            url_dupes["original_index"] = url_dupes.index
+
+            st.markdown(f"### 🔗 URL: `{url}`")
+            st.caption(f"Found {len(url_dupes)} copies of this bookmark")
+
+            for idx, row in url_dupes.iterrows():
+                with st.container():
+                    col1, col2, col3 = st.columns([4, 1, 1])
+
+                    with col1:
+                        st.markdown(f"**{row['title']}**")
+                        st.caption(f"📅 {row['date']} | Category: {row['category']}")
+                        if pd.notna(row["tags"]) and row["tags"]:
+                            st.caption(f"🏷️ {row['tags']}")
+
+                    with col2:
+                        st.caption(f"Row {idx + 2}")  # +2 for header and 0-index
+
+                    with col3:
+                        if st.button("🗑️ Delete", key=f"dup_delete_{idx}"):
+                            with st.spinner("Deleting..."):
+                                success, message = delete_bookmark(idx)
+                                if success:
+                                    st.success(message)
+                                    st.cache_resource.clear()
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+
+                st.markdown("---")
+
+            st.divider()
