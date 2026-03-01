@@ -305,7 +305,6 @@ with st.sidebar:
 
                     if success:
                         st.success("✅ " + message)
-                        st.balloons()
                         # Clear cache and reload
                         st.cache_resource.clear()
                         st.rerun()
@@ -409,7 +408,6 @@ with tab2:
 
     if duplicates.empty:
         st.success("✅ No duplicate bookmarks found!")
-        st.balloons()
     else:
         st.warning(f"Found {len(duplicates)} duplicate bookmark entries")
 
